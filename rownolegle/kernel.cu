@@ -107,7 +107,7 @@ int main()
     start = std::chrono::high_resolution_clock::now();
     sumLocalWithCuda(tab, out_local);
     end = std::chrono::high_resolution_clock::now();
-    timeSeq = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    timeSeq = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     printf("\nLocal: %.20f\n", timeSeq.count() / 1000.0f);
 
     printf("\n");
