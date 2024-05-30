@@ -1,5 +1,6 @@
 ﻿
 #include "cuda_runtime.h"
+#include <nvtx3/nvToolsExt.h>
 #include "device_launch_parameters.h"
 
 #include <chrono>
@@ -7,39 +8,31 @@
 #include <time.h>
 #include <stdlib.h>
 #include <math.h>
+#include <vector>
 
-const int N = 512;
-const int R = 16;
-const int K = 2;
 
-const int BLOCK_SIZE = 16;
-
+const int N = 1000;
+const int R = 2;
 const int OUTSIZE = N - 2 * R;
 
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
-cudaError_t sumLocalWithCuda(float *tab, float *out);
+float sumLocalWithCuda(float *tab, float *out, int block_size, int k, char * name);
 
-__global__ void addKernel(int *c, const int *a, const int *b)
+__global__ void localKernel(float* tab, float* out, int* kkk)
 {
-    int i = threadIdx.x;
-    c[i] = a[i] + b[i];
-}
+    int i = (threadIdx.x + blockIdx.x * blockDim.x) * *kkk;
+    int j = (threadIdx.y + blockIdx.y * blockDim.y);
 
-__global__ void localKernel(float* tab, float* out)
-{
-    int i = threadIdx.x + blockIdx.x * blockDim.x;
-    int j = (threadIdx.y + blockIdx.y * blockDim.y) * K;
-
-    for (int k = 0; k < K; k++) {
-        float sum = 0;
-        if (j + k < OUTSIZE) {
-            for (int y = 0; y <= 2 * R; y++) {
-                int jyk = (j + y + k)*N;
-                for (int x = 0; x <= 2 * R; x++) {
-                    sum += tab[jyk + (i + x)];
-                }
+    for (int k = 0; k < *kkk; k++) {
+        int ik = i + k;
+        if (ik < OUTSIZE) {
+			float sum = 0;
+            for (int y = 0; y <= 2*R; y++) {
+                int jy = (j + y)*N;
+				for (int x = 0; x <= 2*R; x++) {
+					sum += tab[jy + (ik + x)];
+				}
             }
-            out[(j + k) * (OUTSIZE) + i] = sum;
+            out[(j) * (OUTSIZE) + ik] = sum;
         }
     }
 }
@@ -84,44 +77,90 @@ int main()
     srand(time(NULL));
 
     float* tab = (float*)malloc(N * N * sizeof(float));
-    
+
 
     for (int j = 0; j < N; j++) {
         for (int i = 0; i < N; i++) {
-            tab[j*N + i] = rand() % 10;
+            tab[j * N + i] = rand() % 10;
         }
     }
-    
+
     float* out_seq = (float*)malloc(OUTSIZE * OUTSIZE * sizeof(float));
 
     auto start = std::chrono::high_resolution_clock::now();
     sequential(tab, out_seq);
     auto end = std::chrono::high_resolution_clock::now();
-    auto timeSeq = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    printf("\nSeq: %.20f\n", timeSeq.count() / 1000.0f);
+    auto timeSeq = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    int field = 2 * R + 1;
+	long long flops = OUTSIZE * OUTSIZE * field * field;
+    double fps = flops / static_cast<double>(timeSeq.count() / 1000.f);
+
+
+    printf("-,-,%.4f,%.4f\n", timeSeq.count() / 1000.0f, fps / 1e9);
 
     float* out_local = (float*)malloc(OUTSIZE * OUTSIZE * sizeof(float));
     start = std::chrono::high_resolution_clock::now();
-    sumLocalWithCuda(tab, out_local);
+    sumLocalWithCuda(tab, out_local, 1, 8, "warmup");
     end = std::chrono::high_resolution_clock::now();
-    timeSeq = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    printf("\nLocal: %.20f\n", timeSeq.count() / 1000.0f);
+    timeSeq = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
-    const int arraySize = 5;
-    const int a[arraySize] = { 1, 2, 3, 4, 5 };
-    const int b[arraySize] = { 10, 20, 30, 40, 50 };
-    int c[arraySize] = { 0 };
+    std::vector<int> ks = { 1, 4, 16 };
+    std::vector<int> bs = { 8, 16, 32 };
+
+    long long memory_traffic_elem = field * field * sizeof(float) + sizeof(float);
+    long long full_memory_traffic = (OUTSIZE) * (OUTSIZE) * memory_traffic_elem;
+    for (auto k : ks) {
+        for (auto b : bs) {
+			cudaDeviceReset();
+            char text[30] = "";
+            sprintf(text, "b: %d, k: %d", b, k);
+			start = std::chrono::high_resolution_clock::now();
+			auto ftime = sumLocalWithCuda(tab, out_local, b, k, text);
+			end = std::chrono::high_resolution_clock::now();
+			timeSeq = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            double fps = flops / static_cast<double>(ftime / 1000.f);
+            double fpb = flops / static_cast<double>(full_memory_traffic);
+
+			printf("%d,%d,%.4f,%.4f\n", b, k, timeSeq.count() / 1000.0f, fps / 1e9);
+            
+            for (int i = 0; i < OUTSIZE * OUTSIZE; i++) {
+                if (out_local[i] != out_seq[i]) {
+                    printf("dupa blada\n");
+                    break;
+                }
+            }
+        }
+    }
 }
 
-cudaError_t sumLocalWithCuda(float* tab, float* out) 
+float sumLocalWithCuda(float* tab, float* out, int block_size, int k, char* name) 
 {
     float* dev_tab = 0;
     float* dev_out = 0;
+    int* dev_k = 0;
     cudaError_t cudaStatus;
+
+    cudaEvent_t start;
+    cudaEvent_t stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    float time;
 
     cudaStatus = cudaSetDevice(0);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+        goto Error;
+    }
+
+    cudaStatus = cudaMalloc((void**)&dev_k, sizeof(int));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+    cudaStatus = cudaMemcpy(dev_k, &k, sizeof(int), cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
         goto Error;
     }
 
@@ -143,10 +182,14 @@ cudaError_t sumLocalWithCuda(float* tab, float* out)
         goto Error;
     }
 
-    dim3 threadsMatrix(BLOCK_SIZE, BLOCK_SIZE);
-    dim3 blocksMatrix(ceil((OUTSIZE) / (float)BLOCK_SIZE), ceil((OUTSIZE) / (float)BLOCK_SIZE / K));
+    dim3 threadsMatrix(block_size, block_size);
+    dim3 blocksMatrix(ceil((OUTSIZE) / (float)block_size / k), ceil((OUTSIZE) / (float)block_size));
 
-    localKernel<<< blocksMatrix, threadsMatrix >>>(dev_tab, dev_out);
+    cudaEventRecord(start, nullptr);
+
+    nvtxRangePush(name);
+    localKernel<<< blocksMatrix, threadsMatrix >>>(dev_tab, dev_out, dev_k);
+    nvtxRangePop();
 
     // Check for any errors launching the kernel
     cudaStatus = cudaGetLastError();
@@ -163,96 +206,20 @@ cudaError_t sumLocalWithCuda(float* tab, float* out)
         goto Error;
     }
 
+    cudaEventRecord(stop, nullptr);
+
+
     cudaStatus = cudaMemcpy(out, dev_out, (OUTSIZE) * (OUTSIZE) * sizeof(float), cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed!");
         goto Error;
     }
 
+    cudaEventElapsedTime(&time, start, stop);
+
     Error:
-    cudaFree(dev_tab);
-    cudaFree(dev_out);
+	cudaFree(dev_tab);
+	cudaFree(dev_out);
     
-    return cudaStatus;
-}
-
-// Helper function for using CUDA to add vectors in parallel.
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size)
-{
-    int *dev_a = 0;
-    int *dev_b = 0;
-    int *dev_c = 0;
-    cudaError_t cudaStatus;
-
-    // Choose which GPU to run on, change this on a multi-GPU system.
-    cudaStatus = cudaSetDevice(0);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-        goto Error;
-    }
-
-    // Allocate GPU buffers for three vectors (two input, one output)    .
-    cudaStatus = cudaMalloc((void**)&dev_c, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMalloc((void**)&dev_a, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMalloc((void**)&dev_b, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
-
-    // Copy input vectors from host memory to GPU buffers.
-    cudaStatus = cudaMemcpy(dev_a, a, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-    cudaStatus = cudaMemcpy(dev_b, b, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-
-    // Launch a kernel on the GPU with one thread for each element.
-    addKernel<<< 1, size>>>(dev_c, dev_a, dev_b);
-
-    // Check for any errors launching the kernel
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Error;
-    }
-    
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-        goto Error;
-    }
-
-    // Copy output vector from GPU buffer to host memory.
-    cudaStatus = cudaMemcpy(c, dev_c, size * sizeof(int), cudaMemcpyDeviceToHost);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
-
-Error:
-    cudaFree(dev_c);
-    cudaFree(dev_a);
-    cudaFree(dev_b);
-    
-    return cudaStatus;
+    return time;
 }
