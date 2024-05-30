@@ -11,7 +11,7 @@
 #include <vector>
 
 
-const int N = 1000;
+const int N = 2000;
 const int R = 2;
 const int OUTSIZE = N - 2 * R;
 
@@ -92,8 +92,7 @@ int main()
     auto end = std::chrono::high_resolution_clock::now();
     auto timeSeq = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     int field = 2 * R + 1;
-	long long flops = OUTSIZE * OUTSIZE * field * field;
-    double fps = flops / static_cast<double>(timeSeq.count() / 1000.f);
+    double fps = OUTSIZE * OUTSIZE / static_cast<double>(timeSeq.count() / 1000.f) * field * field;
 
 
     printf("-,-,%.4f,%.4f\n", timeSeq.count() / 1000.0f, fps / 1e9);
@@ -118,8 +117,8 @@ int main()
 			auto ftime = sumLocalWithCuda(tab, out_local, b, k, text);
 			end = std::chrono::high_resolution_clock::now();
 			timeSeq = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-            double fps = flops / static_cast<double>(ftime / 1000.f);
-            double fpb = flops / static_cast<double>(full_memory_traffic);
+            double fps = OUTSIZE * OUTSIZE / static_cast<double>(ftime / 1000.f) * field * field ;
+            double fpb = 0 / static_cast<double>(full_memory_traffic);
 
 			printf("%d,%d,%.4f,%.4f\n", b, k, timeSeq.count() / 1000.0f, fps / 1e9);
             
