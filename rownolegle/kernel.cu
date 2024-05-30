@@ -8,13 +8,13 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define N 4
-#define R 1
-#define K 1
+const int N = 512;
+const int R = 16;
+const int K = 2;
 
-#define BLOCK_SIZE 1
+const int BLOCK_SIZE = 16;
 
-#define OUTSIZE N-2*R
+const int OUTSIZE = N - 2 * R;
 
 cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
 cudaError_t sumLocalWithCuda(float *tab, float *out);
@@ -34,8 +34,9 @@ __global__ void localKernel(float* tab, float* out)
         float sum = 0;
         if (j + k < OUTSIZE) {
             for (int y = 0; y <= 2 * R; y++) {
+                int jyk = (j + y + k)*N;
                 for (int x = 0; x <= 2 * R; x++) {
-                    sum += tab[(j + y + k) * N + (i + x)];
+                    sum += tab[jyk + (i + x)];
                 }
             }
             out[(j + k) * (OUTSIZE) + i] = sum;
@@ -81,7 +82,9 @@ void print_out(float tab[(N-2*R)*(N-2*R)])
 int main()
 {
     srand(time(NULL));
-    float tab[N*N] = { 0 };
+
+    float* tab = (float*)malloc(N * N * sizeof(float));
+    
 
     for (int j = 0; j < N; j++) {
         for (int i = 0; i < N; i++) {
@@ -89,9 +92,7 @@ int main()
         }
     }
     
-    print(tab);
-
-    float out_seq[(N - R * 2) * (N - R * 2)] = { 0 };
+    float* out_seq = (float*)malloc(OUTSIZE * OUTSIZE * sizeof(float));
 
     auto start = std::chrono::high_resolution_clock::now();
     sequential(tab, out_seq);
@@ -99,48 +100,17 @@ int main()
     auto timeSeq = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     printf("\nSeq: %.20f\n", timeSeq.count() / 1000.0f);
 
-    printf("\n");
-    print_out(out_seq);
-    printf("\n"); 
-    
-    float out_local[(N - R * 2) * (N - R * 2)] = { 0 };
+    float* out_local = (float*)malloc(OUTSIZE * OUTSIZE * sizeof(float));
     start = std::chrono::high_resolution_clock::now();
     sumLocalWithCuda(tab, out_local);
     end = std::chrono::high_resolution_clock::now();
     timeSeq = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     printf("\nLocal: %.20f\n", timeSeq.count() / 1000.0f);
 
-    printf("\n");
-    print_out(out_local); 
-    printf("\n"); 
-
     const int arraySize = 5;
     const int a[arraySize] = { 1, 2, 3, 4, 5 };
     const int b[arraySize] = { 10, 20, 30, 40, 50 };
     int c[arraySize] = { 0 };
-
-
-
-
-    // Add vectors in parallel.
-    cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addWithCuda failed!");
-        return 1;
-    }
-
-    printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
-        c[0], c[1], c[2], c[3], c[4]);
-
-    // cudaDeviceReset must be called before exiting in order for profiling and
-    // tracing tools such as Nsight and Visual Profiler to show complete traces.
-    cudaStatus = cudaDeviceReset();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceReset failed!");
-        return 1;
-    }
-
-    return 0;
 }
 
 cudaError_t sumLocalWithCuda(float* tab, float* out) 
@@ -181,7 +151,7 @@ cudaError_t sumLocalWithCuda(float* tab, float* out)
     // Check for any errors launching the kernel
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+        fprintf(stderr, "local launch failed: %s\n", cudaGetErrorString(cudaStatus));
         goto Error;
     }
     
