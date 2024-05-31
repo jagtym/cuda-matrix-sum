@@ -224,9 +224,9 @@ Użytymi przez nas miarami wydajności był czas jaki zajęły obliczenia, iloś
 
 Do obliczenia ilości flopów w naszym algorytmie użyliśmy wzoru: $(N-2R)^2 \cdot (2R + 1)^2$, gdzie $(N-2R)^2$ to rozmiar tablicy wynikowej, a $(2R + 1)^2$ to ilość operacji wykonywanych dla jednej komórki tablicy wynikowej. 
 
-Do wyznaczenia miary GFLOP / s użyliśmy wzoru: $\frac{FLOP}{1e9 \cdot t}$, gdzie FLOP, to ilość flopów obliczona za pomocą poprzedniego wzoru, a $t$ to czas jaki zajęły obliczenia.
+Do wyznaczenia miary GFLOP / s użyliśmy wzoru: $\frac{FLOP}{1e9 \cdot t}$, gdzie FLOP, to ilość flop'ów obliczona za pomocą poprzedniego wzoru, a $t$ to czas jaki zajęły obliczenia.
 
-Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wyniki zapisane w poniższych pomiarach zostały wygenerowane przez używane przez nas oprogramowanie - NVIDIA Nsight Compute.
+Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wyniki zapisane w poniższych pomiarach zostały wygenerowane przez używane przez nas oprogramowanie - NVIDIA Nsight Compute. Nie wykorzystaliśmy wyników własnych obliczeń, ponieważ miara ta jest zależna od sposobu korzystania z pamięci globalnej karty. Kernel w naszym projekcie napisany został w taki sposób, aby wykorzystywać tę pamięć bardzo efektywnie. Oznacza to, że wątki realizują jednocześnie dostępy do sąsiadujących ze sobą w pamięci globalnej elementów tablicy. Dzięki temu dostępy do pamięci karty są łączone. Oznacza to, że obliczane przez nas FLOP'y / B nie są wartością prawdziwą, ponieważ rozpatrzamy jedynie najgorszy możliwy przypadek. Wzór jakiego użyliśmy to: $\frac{FLOP}{(N-2R)^2 \cdot \{(2R+1)^2+1\} \cdot sizeof(float)}$, gdzie FLOP oznacza ilość flop'ów, $(N-2R)^2$ to rozmiar tablicy wynikowej, $\{(2R + 1)^2+1\}$ to liczba operacji wykonywanych dla jednej komórki tablicy wynikowej wraz z zapisem do niej obliczonej sumy.
 
 ## Pomiary
 
@@ -355,3 +355,13 @@ Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wynik
 | 7               | 8         | 16 | 0.0810 | 215.9682 | 38.96  |
 | 8               | 16        | 16 | 0.0780 | 227.3868 | 42.44  |
 | 9               | 32        | 16 | 0.0850 | 181.3594 | 36.27  |
+
+## Wnioski
+
+### Wpływ parametrów na czas wykonywania obliczeń
+Czas wykonywania obliczeń był zależny od użytych w eksperymencie parametrów. Największy wpływ miał parametr $R$, czyli promień w jakim wykonywane były obliczenia. Zauważyliśmy, że dla małej wartości $R$ wyniki eksperymentu były nieprzewidywalne. Spowodowane jest to najprawdopodobniej małym wykorzystaniem mocy obliczeniowej używanej karty graficznej. Przy zwiększeniu promienia, czas wykonywania obliczeń zdecydowanie się wydłużał. Różnica jest najlepiej widoczna dla algorytmu sekwencyjnego, który przy dużej ilości operacji do wykonania zdecydowanie spowalniał. Algorytm wykonujący obliczenia równolegle róœnież znacząco spowolnił. Jest to spowodowane dużo większą liczbą operacji sumowania do wykonania nawet przy niewielkim zwiększeniu promienia. 
+
+Kolejnym parametrem, który wpływał na wydłużenie wykonywania zadania jest liczba wyników obliczanych przez jeden wątek (parametr $K$). Jego zwiększenie również powoduje wydłużenie czasu wykonywania obliczeń. Powodowane jest to wzrostem liczby operacji, jakie musi wykonać każdy wątek, co prowadzi do zwiększenia czasu wykonania z powodu niekorzystnych wzorców dostępu do pamięci oraz zwiększonych opóźnień synchronizacji.
+
+Podobną tendencję zauważyć można przy zmianie wielkości bloku. Im wyższa wartość $BS$, tym dłuższy czas wykonywania obliczeń. W niektórych przypadkach, przy małej wartości $R$ blok o wielkości $16 \times 16$ pozwalał na wykonanie obliczeń w najkrótszym czasie.
+ 
