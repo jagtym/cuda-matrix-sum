@@ -368,6 +368,7 @@ Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wynik
 | 9               | 32        | 16 | 0.0850 | 181.3594 | 36.27  |
 
 ### Wykresy
+
 ***Wykres 1. Miara wydajności obliczeniowej w zależności od wymiaru tablicy wejściowej ($N$)***
 ![Wykres1](wykres1.png)
 
