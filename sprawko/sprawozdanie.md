@@ -228,7 +228,18 @@ Do wyznaczenia miary GFLOP / s użyliśmy wzoru: $\frac{FLOP}{1e9 \cdot t}$, gdz
 
 Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wyniki zapisane w poniższych pomiarach zostały wygenerowane przez używane przez nas oprogramowanie - NVIDIA Nsight Compute. Nie wykorzystaliśmy wyników własnych obliczeń, ponieważ miara ta jest zależna od sposobu korzystania z pamięci globalnej karty. Kernel w naszym projekcie napisany został w taki sposób, aby wykorzystywać tę pamięć bardzo efektywnie. Oznacza to, że wątki realizują jednocześnie dostępy do sąsiadujących ze sobą w pamięci globalnej elementów tablicy (koalescencja dostępu do pamięci globalnej). Dzięki temu dostępy do pamięci karty są łączone. Oznacza to, że obliczane przez nas FLOP'y / B nie są wartością prawdziwą, ponieważ rozpatrzamy jedynie najgorszy możliwy przypadek. Wzór jakiego użyliśmy to: $\frac{FLOP}{(N-2R)^2 \cdot \{(2R+1)^2+1\} \cdot sizeof(float)}$, gdzie FLOP oznacza ilość flop'ów, $(N-2R)^2$ to rozmiar tablicy wynikowej, $\{(2R + 1)^2+1\}$ to liczba operacji wykonywanych dla jednej komórki tablicy wynikowej wraz z zapisem do niej obliczonej sumy.
 
+## Zobrazowanie problemu
+
+***Schemat 1. Miejsce dostępu i kolejność dostępu do danych realizowane przez poszczególne wątki i bloki***
+![Schemat1](schemat1.png)
+
+***Schemat 2. Wartości wyników wyznaczane przez bloki i wątki***
+![Schemat2](schemat2.png)
+
+
 ## Pomiary
+
+### Tabele
 
 ***Tabela 1. $N = 1000, R = 2$***
 | Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
@@ -355,6 +366,19 @@ Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wynik
 | 7               | 8         | 16 | 0.0810 | 215.9682 | 38.96  |
 | 8               | 16        | 16 | 0.0780 | 227.3868 | 42.44  |
 | 9               | 32        | 16 | 0.0850 | 181.3594 | 36.27  |
+
+### Wykresy
+***Wykres 1. Miara wydajności obliczeniowej w zależności od wymiaru tablicy wejściowej ($N$)***
+![Wykres1](wykres1.png)
+
+***Wykres 2. Miara wydajności obliczeniowej w zależności od liczby wyników obliczanych przez jeden wątek ($K$)***
+![Wykres2](wykres2.png)
+
+***Wykres 3. Miara wydajności obliczeniowej w zależności od promienia w jakim elementy tablicy są sumowane ($R$)***
+![Wykres3](wykres3.png)
+
+***Wykres 4. Miara wydajności obliczeniowej w zależności od wielkości bloku ($BS$)***
+![Wykres4](wykres4.png)
 
 ## Wnioski
 
