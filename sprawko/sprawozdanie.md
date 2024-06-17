@@ -323,6 +323,7 @@ Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wynik
 | 8               | 4  | 32        | 0.0022 | 2054.3492 | 41,79  |
 | 9               | 16 | 32        | 0.0023 | 2010.2416 | 42,98  |
 
+
 ***Tabela 6. $N = 4000, R = 16$***
 
 | Wariant         | K  | BlockSize | Czas   | GFLOP/s   | FLOP/B |
