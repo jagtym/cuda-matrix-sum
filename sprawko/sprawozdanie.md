@@ -149,7 +149,7 @@ __global__ void localKernel(float* tab, float* out, int* kkk)
 
 Poniższy kod odpowiada za wywołanie procedury kernela wykorzystywanego to przeprowadzenia obliczeń. Kolejno ustawiane jest urządzenie GPU, alokowana jest pamięć karty graficznej, do której skopiowane zostaną tablice wejściowa i wyjściowa, a następnie tablica wejściowa kopiowana jest z urządzenia host'a do pamięci karty graficznej. Kernel wywoływany jest za pomocą polecenia `localKernel <<< blocksMatrix, threadsMatrix >>>(dev_tab, dev_out);`, podawana jest macierz bloków o wymiarach $ceil(OUTSIZE / BLOCKSIZE) / ceil(OUTSIZE / BLOCKSIZE / K)$, gdzie $OUTSIZE$ jest równe wartości $N-2R$ - wielkości krawędzi tablicy wynikowej. Macierz bloków uwzględnia wykonywanie obliczeń dla kilku komórek tablicy $out$ przez jeden wątek - jeden z wymiarów jest dzielony przez wartość $K$.
 
-Po wywołaniu kernela sprawdzane jest czy wystąpiły błędy, następuje synchronizacja - oczekiwanie na zakończenie wywoływania kernela na GPU, po synchronizacji kopiowane są wartości tablicy wynikowej $dev_out$ znajdującej się w pamięci karty graficznej do tablicy $out$ na urządzeniu hosta.
+Po wywołaniu kernela sprawdzane jest czy wystąpiły błędy, następuje synchronizacja - oczekiwanie na zakończenie wywoływania kernela na GPU, po synchronizacji kopiowane są wartości tablicy wynikowej `dev_out` znajdującej się w pamięci karty graficznej do tablicy $out$ na urządzeniu hosta.
 
   ***Kod 3. Wywołanie kernela***
 
