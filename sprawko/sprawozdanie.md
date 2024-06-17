@@ -400,6 +400,9 @@ Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wynik
 
 ![Wykres4](wykres4.png)
 
+***Wykres 5. Miara wydajności obliczeniowej w zależności od wielkości bloku ($BS$)***
+![Wykres5](wykres5.png)
+
 ## Wnioski
 
 ### Wpływ parametrów na czas wykonywania obliczeń
