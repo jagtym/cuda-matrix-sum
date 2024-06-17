@@ -237,6 +237,8 @@ Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wynik
 ***Schemat 2. Wartości wyników wyznaczane przez bloki i wątki***
 ![Schemat2](schemat2.png)
 
+***Schemat 3. Efektywne wykorzystanie pamięci - sąsiednie wątki korzystają z tej samej pamięci***
+![Schemat2](schemat3.png)
 
 ## Pomiary
 
