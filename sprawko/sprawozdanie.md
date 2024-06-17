@@ -99,6 +99,7 @@ Przykładowo dla $R=1$ $OUT[i][j]=TAB[i][j]+ TAB[i][j-1]+ TAB[i][j+1]+ TAB[i-1][
 Poniższa funkcja to część programu, która służy obliczeniom sekwencyjnym (wykorzystuje jeden wątek) przy użyciu głównego procesora komputera. Zewnętrzne pętle programu z zmiennymi iteracyjnymi $i$ oraz $j$ wskazują na kolejne pola tablicy wejściowej, dla których będziemy przeprowadzali sumowanie. Pola w odległości mniejszej od $R$ są pomijane ze względu na niemożliwe przeprowadzenie sumy, gdy pola w zasięgu promienia wychodzą poza obszar tablicy. Pętle wewnętrzne wyznaczające $x$ i $y$ wskazują na kolejne pola występujące w obrębie promienia sumowania, kolejno odczytywane są wartości tablicy wejściowej na wskazanych indeksach, a następnie zwiększana jest wartość sumy dla komórki tablicy wyjściowej. Gdy zsumowane zostaną wszystkie pola w obrębie promienia $R$ wartość sumy $sum$ zapisywana jest do tablicy wyjściowej.  
 
   ***Kod 1. Obliczenia sekwencyjne***
+
 ~~~ { #K1 .cpp .numberLines caption="Kod 1. Obliczenia sekwencyjne"}
 
 void sequential(float tab[N*N], float out[(N-2*R)*(N-2*R)])
@@ -122,6 +123,7 @@ void sequential(float tab[N*N], float out[(N-2*R)*(N-2*R)])
 Poniższy kernel służy obliczeniom równoległym przy użyciu technologii CUDA procesora graficznego. Algorytm efektywnie wykorzystuje dane w pamięci globalnej karty - wątki dzięki przesunięciu w pionie kolejnych k obliczeń wątku realizują jednocześnie dostępy do sąsiednich elementów w pamięci globalnej. Wartości $i$ i $j$ są indeksami określającymi pozycję w tablicy wynikowej, wyliczane są na podstawie indeksu wątku, indeksu bloku, a także wymiaru bloku. Wartość $j$ jest dodatkowo przemnażana przez zmienną $kkk$, która odpowiada parametrowi $K$ - liczbie komórek tablicy wyjściowej przetwarzanej przez pojedynczy wątek. Pierwsza pętla przechodzi po wartościach $k$, które oznaczają kolejne komórki tablicy wynikowej przetwarzane przez wątek. Następnie dwie wewnętrzne pętle ustalają wartości $y$ i $x$, które służą do odczytu wartości w promieniu $R$ w tablicy wejściowej. Po odczycie wartości sumowanej komórki zwiększana jest lokalna zmienna $sum$, która następnie jest wpisywana w odpowiadające miejsce w tablicy wyjściowej. Ze względu wykorzystanie przesunięcia $k$ (kolejnych obliczanych komórek tablicy wyjściowej) w powiązaniu z wartością j, kolejne obliczane komórki przesunięte są w pionie. Dzięki temu sąsiednie wątki w wiązce korzystają ze wspólnych danych, ograniczając liczbę koniecznych odczytów z pamięci.
 
   ***Kod 2. Obliczenia przy użyciu CUDA***
+
 ~~~ { #K2 .cpp .numberLines caption="Kod 2. Obliczenia CUDA"}
 __global__ void localKernel(float* tab, float* out, int* kkk)
 {
@@ -150,6 +152,7 @@ Poniższy kod odpowiada za wywołanie procedury kernela wykorzystywanego to prze
 Po wywołaniu kernela sprawdzane jest czy wystąpiły błędy, następuje synchronizacja - oczekiwanie na zakończenie wywoływania kernela na GPU, po synchronizacji kopiowane są wartości tablicy wynikowej $dev_out$ znajdującej się w pamięci karty graficznej do tablicy $out$ na urządzeniu hosta.
 
   ***Kod 3. Wywołanie kernela***
+
 ~~~ { #K3 .cpp .numberLines caption="Kod 2. Wywołanie kernela"}
 cudaError_t sumLocalWithCuda(float* tab, float* out) 
 {
@@ -382,15 +385,19 @@ Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wynik
 
 ### Wykresy
 ***Wykres 1. Miara wydajności obliczeniowej w zależności od wymiaru tablicy wejściowej ($N$)***
+
 ![Wykres1](wykres1.png)
 
 ***Wykres 2. Miara wydajności obliczeniowej w zależności od liczby wyników obliczanych przez jeden wątek ($K$)***
+
 ![Wykres2](wykres2.png)
 
 ***Wykres 3. Miara wydajności obliczeniowej w zależności od promienia w jakim elementy tablicy są sumowane ($R$)***
+
 ![Wykres3](wykres3.png)
 
 ***Wykres 4. Miara wydajności obliczeniowej w zależności od wielkości bloku ($BS$)***
+
 ![Wykres4](wykres4.png)
 
 ## Wnioski
