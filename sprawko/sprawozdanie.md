@@ -14,8 +14,10 @@ Kaper Magnuszewski 151746 - kacper.magnuszewski@student.put.poznan.pl
 
 ### Sprawozdanie
 
-_Wymagany termin oddania sprawozdania -_ 31.05.2024  
+_Wymagany termin oddania sprawozdania -_ 31.05.2024
 _Rzeczywisty termin oddania sprawozdania -_ 31.05.2024  
+
+Wersja poprawiona -_ 17.06.2024
 
 ## Cel zadania
 Celem ćwiczenia jest praktyczne zapoznanie z zasadami programowania równoległego procesorów kart graficznych (PKG), zapoznanie z zasadami optymalizacji kodu dla PKG oraz ocena prędkości przetwarzania przy użyciu PKG i poznanie czynników warunkujących realizację efektywnego przetwarzania.
@@ -117,34 +119,33 @@ void sequential(float tab[N*N], float out[(N-2*R)*(N-2*R)])
 
 
 ### Algorytm rozwiązujący problem równolegle wykorzystujący pamięć globalną
-Poniższy kernel służy obliczeniom równoległym przy użyciu technologii CUDA procesora graficznego. Algorytm efektywnie wykorzystuje dane w pamięci globalnej karty - wątki realizują jednocześnie dostępy do sąsiednich elementów w pamięci globalnej. Wartości $i$ i $j$ są indeksami określającymi pozycję w tablicy wynikowej, wyliczane są na podstawie indeksu wątku, indeksu bloku, a także wymiaru bloku. Wartość $i$ jest dodatkowo przemnażana przez zmienną $kkk$, która odpowiada parametrowi $K$ - liczbie komórek tablicy wyjściowej przetwarzanej przez pojedynczy wątek. Pierwsza pętla przechodzi po wartościach $k$, które oznaczają kolejne komórki tablicy wynikowej przetwarzane przez wątek. Następnie dwie wewnętrzne pętle ustalają wartości $y$ i $x$, które służą do odczytu wartości w promieniu $R$ w tablicy wejściowej. Po odczycie wartości sumowanej komórki zwiększana jest lokalna zmienna $sum$, która następnie jest wpisywana w odpowiadające miejsce w tablicy wyjściowej. Ze względu wykorzystanie przesunięcia $k$ (kolejnych obliczanych komórek tablicy wyjściowej) w powiązaniu z indeksem w kolumnie, następne dane w tablicy są w bezpośrednim sąsiedztwie nawet, gdy obliczana jest więcej niż jedna komórka tablicy wyjściowej.
+Poniższy kernel służy obliczeniom równoległym przy użyciu technologii CUDA procesora graficznego. Algorytm efektywnie wykorzystuje dane w pamięci globalnej karty - wątki dzięki przesunięciu w pionie kolejnych k obliczeń wątku realizują jednocześnie dostępy do sąsiednich elementów w pamięci globalnej. Wartości $i$ i $j$ są indeksami określającymi pozycję w tablicy wynikowej, wyliczane są na podstawie indeksu wątku, indeksu bloku, a także wymiaru bloku. Wartość $j$ jest dodatkowo przemnażana przez zmienną $kkk$, która odpowiada parametrowi $K$ - liczbie komórek tablicy wyjściowej przetwarzanej przez pojedynczy wątek. Pierwsza pętla przechodzi po wartościach $k$, które oznaczają kolejne komórki tablicy wynikowej przetwarzane przez wątek. Następnie dwie wewnętrzne pętle ustalają wartości $y$ i $x$, które służą do odczytu wartości w promieniu $R$ w tablicy wejściowej. Po odczycie wartości sumowanej komórki zwiększana jest lokalna zmienna $sum$, która następnie jest wpisywana w odpowiadające miejsce w tablicy wyjściowej. Ze względu wykorzystanie przesunięcia $k$ (kolejnych obliczanych komórek tablicy wyjściowej) w powiązaniu z wartością j, kolejne obliczane komórki przesunięte są w pionie. Dzięki temu sąsiednie wątki w wiązce korzystają ze wspólnych danych, ograniczając liczbę koniecznych odczytów z pamięci.
 
   ***Kod 2. Obliczenia przy użyciu CUDA***
 ~~~ { #K2 .cpp .numberLines caption="Kod 2. Obliczenia CUDA"}
 __global__ void localKernel(float* tab, float* out, int* kkk)
 {
-    int i = (threadIdx.x + blockIdx.x * blockDim.x) * *kkk;
-    int j = (threadIdx.y + blockIdx.y * blockDim.y);
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = (threadIdx.y + blockIdx.y * blockDim.y) * (*kkk);
 
     for (int k = 0; k < *kkk; k++) {
-        int ik = i + k;
-        if (ik < OUTSIZE) {
-          float sum = 0;
-          for (int y = 0; y <= 2*R; y++) {
-            int jy = (j + y)*N;
-            for (int x = 0; x <= 2*R; x++) {
-              sum += tab[jy + (ik + x)];
-            }
+      float sum = 0;
+      if (i < OUTSIZE && j + k < OUTSIZE) {
+        for (int y = 0; y <= 2 * R; y++) {
+          int jyk = (j + y + k) * N;
+          for (int x = 0; x <= 2 * R; x++) {
+            sum += tab[jyk + (i + x)];
           }
-          out[(j) * (OUTSIZE) + ik] = sum;
         }
+        out[(j + k) * (OUTSIZE) + i] = sum;
+      }
     }
 }
 ~~~
 
 ### Wywołanie procedury kernela
 
-Poniższy kod odpowiada za wywołanie procedury kernela wykorzystywanego to przeprowadzenia obliczeń. Kolejno ustawiane jest urządzenie GPU, alokowana jest pamięć karty graficznej, do której skopiowane zostaną tablice wejściowa i wyjściowa, a następnie tablica wejściowa kopiowana jest z urządzenia host'a do pamięci karty graficznej. Kernel wywoływany jest za pomocą polecenia `localKernel <<< blocksMatrix, threadsMatrix >>>(dev_tab, dev_out);`, podawana jest macierz bloków o wymiarach $ceil(\frac{OUTSIZE / BLOCKSIZE}{K}) / ceil(OUTSIZE / BLOCKSIZE)$, gdzie $OUTSIZE$ jest równe wartości $N-2R$ - wielkości krawędzi tablicy wynikowej. Macierz bloków uwzględnia wykonywanie obliczeń dla kilku komórek tablicy $out$ przez jeden wątek - jeden z wymiarów jest dzielony przez wartość $K$.
+Poniższy kod odpowiada za wywołanie procedury kernela wykorzystywanego to przeprowadzenia obliczeń. Kolejno ustawiane jest urządzenie GPU, alokowana jest pamięć karty graficznej, do której skopiowane zostaną tablice wejściowa i wyjściowa, a następnie tablica wejściowa kopiowana jest z urządzenia host'a do pamięci karty graficznej. Kernel wywoływany jest za pomocą polecenia `localKernel <<< blocksMatrix, threadsMatrix >>>(dev_tab, dev_out);`, podawana jest macierz bloków o wymiarach $ceil(OUTSIZE / BLOCKSIZE) / ceil(OUTSIZE / BLOCKSIZE / K)$, gdzie $OUTSIZE$ jest równe wartości $N-2R$ - wielkości krawędzi tablicy wynikowej. Macierz bloków uwzględnia wykonywanie obliczeń dla kilku komórek tablicy $out$ przez jeden wątek - jeden z wymiarów jest dzielony przez wartość $K$.
 
 Po wywołaniu kernela sprawdzane jest czy wystąpiły błędy, następuje synchronizacja - oczekiwanie na zakończenie wywoływania kernela na GPU, po synchronizacji kopiowane są wartości tablicy wynikowej $dev_out$ znajdującej się w pamięci karty graficznej do tablicy $out$ na urządzeniu hosta.
 
@@ -241,131 +242,141 @@ Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wynik
 
 ### Tabele
 
-***Tabela 1. $N = 1000, R = 2$***
-| Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
-|-----------------|-----------|----|--------|----------|--------|
-| 0 - Sekwencyjny | -         | -  | 0.0260 | 0.9539   | -      |
-| 1               | 8         | 1  | 0.0590 | 123.4883 | 3,09   |
-| 2               | 16        | 1  | 0.0610 | 119.0678 | 4,56   |
-| 3               | 32        | 1  | 0.0600 | 95.8462  | 3,68   |
-| 4               | 8         | 4  | 0.0610 | 78.1893  | 3,98   |
-| 5               | 16        | 4  | 0.0610 | 92.1756  | 5,01   |
-| 6               | 32        | 4  | 0.0570 | 53.2618  | 4,92   |
-| 7               | 8         | 16 | 0.0600 | 81.9599  | 2,91   |
-| 8               | 16        | 16 | 0.0550 | 103.8752 | 4,92   |
-| 9               | 32        | 16 | 0.0570 | 58.3726  | 3,30   |
+***Tabela 1. $N = 2000, R = 4$***
 
-***Tabela 2. $N = 1000, R = 8$***
-| Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
-|-----------------|-----------|----|--------|----------|--------|
-| 0 - Sekwencyjny | -         | -  | 0.4360 | 0.6418   | -      |
-| 1               | 8         | 1  | 0.0670 | 231.9205 | 10,75  |
-| 2               | 16        | 1  | 0.0930 | 251.5046 | 54,23  |
-| 3               | 32        | 1  | 0.0590 | 142.7381 | 52,66  |
-| 4               | 8         | 4  | 0.0570 | 225.3405 | 54,79  |
-| 5               | 16        | 4  | 0.0550 | 224.7324 | 52,92  |
-| 6               | 32        | 4  | 0.0550 | 180.0812 | 28,24  |
-| 7               | 8         | 16 | 0.0580 | 178.5042 | 10,21  |
-| 8               | 16        | 16 | 0.0530 | 183.3472 | 69,86  |
-| 9               | 32        | 16 | 0.0560 | 107.4548 | 31,5   |
+| Wariant         | K  | BlockSize | Czas   | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|--------|-----------|--------|
+| 0 - Sekwencyjny | -  | -         | 0.0650 | 4.9448    | -      |
+| 1               | 1  | 8         | 0.0003 | 992.9967  | 20,08  |
+| 2               | 4  | 8         | 0.0004 | 789.3871  | 19,88  |
+| 3               | 16 | 8         | 0.0004 | 793.4404  | 19,45  |
+| 4               | 1  | 16        | 0.0003 | 1129.5729 | 12,57  |
+| 5               | 4  | 16        | 0.0003 | 1084.9170 | 19,68  |
+| 6               | 16 | 16        | 0.0002 | 1452.5181 | 20,08  |
+| 7               | 1  | 32        | 0.0003 | 1106.4290 | 12,37  |
+| 8               | 4  | 32        | 0.0002 | 1490.6741 | 19,74  |
+| 9               | 16 | 32        | 0.0002 | 1429.1637 | 20,08  |
 
-***Tabela 3. $N = 1000, R = 16$***
-| Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
-|-----------------|-----------|----|--------|----------|--------|
-| 0 - Sekwencyjny | -         | -  | 1.6070 | 0.6350   | -      |
-| 1               | 8         | 1  | 0.0610 | 255.7616 | 30.11  |
-| 2               | 16        | 1  | 0.0600 | 280.6606 | 190.77 |
-| 3               | 32        | 1  | 0.0590 | 190.0318 | 22.49  |
-| 4               | 8         | 4  | 0.0620 | 249.2368 | 202.73 |
-| 5               | 16        | 4  | 0.0560 | 217.7881 | 111.71 |
-| 6               | 32        | 4  | 0.0630 | 178.8893 | 11.73  |
-| 7               | 8         | 16 | 0.0620 | 185.7848 | 21.79  |
-| 8               | 16        | 16 | 0.0630 | 185.1505 | 10.65  |
-| 9               | 32        | 16 | 0.0670 | 90.6231  | 19.88  |
 
-***Tabela 4. $N = 1500, R = 2$***
-| Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
-|-----------------|-----------|----|--------|----------|--------|
-| 0 - Sekwencyjny | -         | -  | 0.0570 | 0.9816   | -      |
-| 1               | 8         | 1  | 0.0530 | 164.2817 | 6,21   |
-| 2               | 16        | 1  | 0.0570 | 127.9510 | 6,21   |
-| 3               | 32        | 1  | 0.0590 | 117.8042 | 4,8    |
-| 4               | 8         | 4  | 0.0620 | 157.6885 | 3,58   |
-| 5               | 16        | 4  | 0.0620 | 164.5910 | 4,63   |
-| 6               | 32        | 4  | 0.0550 | 125.2561 | 5,11   |
-| 7               | 8         | 16 | 0.0530 | 123.8104 | 5,08   |
-| 8               | 16        | 16 | 0.0580 | 134.6204 | 4,5    |
-| 9               | 32        | 16 | 0.0540 | 108.3369 | 4,72   |
+***Tabela 2. $N = 2000, R = 8$***
 
-***Tabela 5. $N = 1500, R = 8$***
-| Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
-|-----------------|-----------|----|--------|----------|--------|
-| 0 - Sekwencyjny | -         | -  | 0.9840 | 0.6468   | -      |
-| 1               | 8         | 1  | 0.0570 | 278.2980 | 54.49  |
-| 2               | 16        | 1  | 0.0560 | 279.3534 | 13.75  |
-| 3               | 32        | 1  | 0.0640 | 175.1682 | 13.38  |
-| 4               | 8         | 4  | 0.0620 | 218.6267 | 56.68  |
-| 5               | 16        | 4  | 0.0590 | 238.9543 | 56.07  |
-| 6               | 32        | 4  | 0.0630 | 171.7289 | 50.91  |
-| 7               | 8         | 16 | 0.0630 | 175.7471 | 52.28  |
-| 8               | 16        | 16 | 0.0620 | 190.9478 | 15.37  |
-| 9               | 32        | 16 | 0.0610 | 144.9877 | 37.07  |
+| Wariant         | K  | BlockSize | Czas   | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|--------|-----------|--------|
+| 0 - Sekwencyjny | -  | -         | 0.3340 | 3.4059    |        |
+| 1               | 1  | 8         | 0.0008 | 1458.8523 | 46,68  |
+| 2               | 4  | 8         | 0.0011 | 1037.5423 | 46,24  |
+| 3               | 16 | 8         | 0.0012 | 912.9019  | 25,24  |
+| 4               | 1  | 16        | 0.0006 | 1886.8061 | 71,07  |
+| 5               | 4  | 16        | 0.0006 | 1867.1838 | 44,02  |
+| 6               | 16 | 16        | 0.0007 | 1713.7155 | 39,13  |
+| 7               | 1  | 32        | 0.0006 | 1774.9805 | 71,07  |
+| 8               | 4  | 32        | 0.0006 | 1962.8576 | 49,19  |
+| 9               | 16 | 32        | 0.0006 | 1819.0304 | 71,07  |
 
-***Tabela 6. $N = 1500, R = 16$***
-| Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
-|-----------------|-----------|----|--------|----------|--------|
-| 0 - Sekwencyjny | -         | -  | 3.7200 | 0.6309   | -      |
-| 1               | 8         | 1  | 0.0610 | 280.2225 | 36.79  |
-| 2               | 16        | 1  | 0.0630 | 278.4902 | 41.09  |
-| 3               | 32        | 1  | 0.0660 | 205.2083 | 18.04  |
-| 4               | 8         | 4  | 0.0610 | 277.4199 | 50.42  |
-| 5               | 16        | 4  | 0.0640 | 283.6924 | 50.68  |
-| 6               | 32        | 4  | 0.0650 | 209.5466 | 41.49  |
-| 7               | 8         | 16 | 0.0660 | 195.4095 | 33.50  |
-| 8               | 16        | 16 | 0.0680 | 212.5732 | 30.62  |
-| 9               | 32        | 16 | 0.0680 | 162.9650 | 34.75  |
+***Tabela 3. $N = 2000, R = 16$***
 
-***Tabela 7. $N = 2000, R = 2$***
-| Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
-|-----------------|-----------|----|--------|----------|--------|
-| 0 - Sekwencyjny | -         | -  | 0.1040 | 0.9577   | -      |
-| 1               | 8         | 1  | 0.0590 | 173.8542 | 3,6    |
-| 2               | 16        | 1  | 0.0690 | 168.9746 | 4,7    |
-| 3               | 32        | 1  | 0.0610 | 86.5260  | 3,27   |
-| 4               | 8         | 4  | 0.0610 | 180.2370 | 2,21   |
-| 5               | 16        | 4  | 0.0580 | 177.5332 | 4,67   |
-| 6               | 32        | 4  | 0.0600 | 121.2746 | 4,9    |
-| 7               | 8         | 16 | 0.0620 | 138.9515 | 1,85   |
-| 8               | 16        | 16 | 0.0590 | 121.1236 | 3,39   |
-| 9               | 32        | 16 | 0.0670 | 95.9497  | 2,83   |
+| Wariant         | K  | BlockSize | Czas   | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|--------|-----------|--------|
+| 0 - Sekwencyjny | -  | -         | 1.5750 | 2.6779    | -      |
+| 1               | 1  | 8         | 0.0028 | 1517.2014 | 207,18 |
+| 2               | 4  | 8         | 0.0041 | 1033.8449 | 52,93  |
+| 3               | 16 | 8         | 0.0042 | 994.7010  | 205,76 |
+| 4               | 1  | 16        | 0.0025 | 1657.6391 | 92,07  |
+| 5               | 4  | 16        | 0.0020 | 2086.1312 | 161,49 |
+| 6               | 16 | 16        | 0.0023 | 1814.4553 | 161,18 |
+| 7               | 1  | 32        | 0.0020 | 2061.8514 | 165,23 |
+| 8               | 4  | 32        | 0.0020 | 2130.4732 | 119,94 |
+| 9               | 16 | 32        | 0.0022 | 1901.9313 | 261,20 |
 
-***Tabela 8. $N = 2000, R = 8$***
-| Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
-|-----------------|-----------|----|--------|----------|--------|
-| 0 - Sekwencyjny | -         | -  | 1.7440 | 0.6523   | -      |
-| 1               | 8         | 1  | 0.0650 | 277.5946 | 35.16  |
-| 2               | 16        | 1  | 0.0640 | 253.6790 | 54.13  |
-| 3               | 32        | 1  | 0.0620 | 181.7208 | 49.61  |
-| 4               | 8         | 4  | 0.0610 | 277.1098 | 53.98  |
-| 5               | 16        | 4  | 0.0600 | 282.2315 | 28.39  |
-| 6               | 32        | 4  | 0.0630 | 217.4602 | 14.49  |
-| 7               | 8         | 16 | 0.0630 | 198.5152 | 53.92  |
-| 8               | 16        | 16 | 0.0630 | 232.4457 | 54.37  |
-| 9               | 32        | 16 | 0.0630 | 173.1191 | 25.03  |
+***Tabela 4. $N = 4000, R = 4$***
 
-***Tabela 9. $N = 2000, R = 16$***
-| Wariant         | BlockSize | K  | Czas [s]  | GFLOP/s  | FLOP/B |
-|-----------------|-----------|----|--------|----------|--------|
-| 0 - Sekwencyjny | -         | -  | 6.6810 | 0.6313   | -      |
-| 1               | 8         | 1  | 0.0710 | 289.6552 | 42.98  |
-| 2               | 16        | 1  | 0.0740 | 290.2676 | 32.79  |
-| 3               | 32        | 1  | 0.0750 | 212.3841 | 41.42  |
-| 4               | 8         | 4  | 0.0700 | 279.4615 | 54.73  |
-| 5               | 16        | 4  | 0.0730 | 280.8640 | 25.74  |
-| 6               | 32        | 4  | 0.0750 | 213.1179 | 48.22  |
-| 7               | 8         | 16 | 0.0810 | 215.9682 | 38.96  |
-| 8               | 16        | 16 | 0.0780 | 227.3868 | 42.44  |
-| 9               | 32        | 16 | 0.0850 | 181.3594 | 36.27  |
+| Wariant         | K  | BlockSize | Czas   | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|--------|-----------|--------|
+| 0 - Sekwencyjny | -  | -         | 0.2700 | 4.7808    | -      |
+| 1               | 1  | 8         | 0.0014 | 952.4949  | 10,12  |
+| 2               | 4  | 8         | 0.0013 | 972.0507  | 10,57  |
+| 3               | 16 | 8         | 0.0013 | 966.7392  | 11,68  |
+| 4               | 1  | 16        | 0.0008 | 1543.3946 | 11,79  |
+| 5               | 4  | 16        | 0.0008 | 1699.2358 | 12,06  |
+| 6               | 16 | 16        | 0.0008 | 1603.0744 | 11,68  |
+| 7               | 1  | 32        | 0.0008 | 1526.1108 | 11,69  |
+| 8               | 4  | 32        | 0.0007 | 1853.0945 | 11,97  |
+| 9               | 16 | 32        | 0.0008 | 1708.1584 | 9,38   |
+
+***Tabela 5. $N = 4000, R = 8$***
+
+| Wariant         | K  | BlockSize | Czas   | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|--------|-----------|--------|
+| 0 - Sekwencyjny | -  | -         | 1.3780 | 3.3288    | -      |
+| 1               | 1  | 8         | 0.0044 | 1036.5332 | 41,82  |
+| 2               | 4  | 8         | 0.0043 | 1062.5723 | 41,05  |
+| 3               | 16 | 8         | 0.0046 | 989.7009  | 37,47  |
+| 4               | 1  | 16        | 0.0025 | 1816.6027 | 42,98  |
+| 5               | 4  | 16        | 0.0023 | 2023.7792 | 41,95  |
+| 6               | 16 | 16        | 0.0026 | 1792.6804 | 41,82  |
+| 7               | 1  | 32        | 0.0024 | 1922.1508 | 32,26  |
+| 8               | 4  | 32        | 0.0022 | 2054.3492 | 41,79  |
+| 9               | 16 | 32        | 0.0023 | 2010.2416 | 42,98  |
+
+***Tabela 6. $N = 4000, R = 16$***
+
+| Wariant         | K  | BlockSize | Czas   | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|--------|-----------|--------|
+| 0 - Sekwencyjny | -  | -         | 6.3560 | 2.6977    | -      |
+| 1               | 1  | 8         | 0.0158 | 1082.0573 | 98,90  |
+| 2               | 4  | 8         | 0.0163 | 1050.7608 | 116,93 |
+| 3               | 16 | 8         | 0.0170 | 1006.4650 | 122,24 |
+| 4               | 1  | 16        | 0.0090 | 1910.6641 | 96,25  |
+| 5               | 4  | 16        | 0.0081 | 2115.6857 | 139,25 |
+| 6               | 16 | 16        | 0.0092 | 1871.5433 | 120,22 |
+| 7               | 1  | 32        | 0.0079 | 2178.7440 | 112,03 |
+| 8               | 4  | 32        | 0.0078 | 2201.5895 | 122,75 |
+| 9               | 16 | 32        | 0.0079 | 2165.9561 | 129,35 |
+
+***Tabela 7. $N = 8000, R = 4$***
+
+| Wariant         | K  | BlockSize | Czas   | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|--------|-----------|--------|
+| 0 - Sekwencyjny | -  | -         | 6.3560 | 2.6977    | -      |
+| 1               | 1  | 8         | 0.0158 | 1082.0573 | 98,90  |
+| 2               | 4  | 8         | 0.0163 | 1050.7608 | 116,93 |
+| 3               | 16 | 8         | 0.0170 | 1006.4650 | 122,24 |
+| 4               | 1  | 16        | 0.0090 | 1910.6641 | 96,25  |
+| 5               | 4  | 16        | 0.0081 | 2115.6857 | 139,25 |
+| 6               | 16 | 16        | 0.0092 | 1871.5433 | 120,22 |
+| 7               | 1  | 32        | 0.0079 | 2178.7440 | 112,03 |
+| 8               | 4  | 32        | 0.0078 | 2201.5895 | 122,75 |
+| 9               | 16 | 32        | 0.0079 | 2165.9561 | 129,35 |
+
+***Tabela 8. $N = 8000, R = 8$***
+
+| Wariant         | K  | BlockSize | Czas   | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|--------|-----------|--------|
+| 0 - Sekwencyjny | -  | -         | 5.4610 | 3.3734    | -      |
+| 1               | 1  | 8         | 0.0171 | 1077.1781 | 32,27  |
+| 2               | 4  | 8         | 0.0158 | 1168.1293 | 32,21  |
+| 3               | 16 | 8         | 0.0161 | 1141.2327 | 34,53  |
+| 4               | 1  | 16        | 0.0090 | 2052.6355 | 34,79  |
+| 5               | 4  | 16        | 0.0078 | 2368.4721 | 36,82  |
+| 6               | 16 | 16        | 0.0086 | 2129.7647 | 35,34  |
+| 7               | 1  | 32        | 0.0081 | 2281.3711 | 35,17  |
+| 8               | 4  | 32        | 0.0076 | 2425.7875 | 37,15  |
+| 9               | 16 | 32        | 0.0076 | 2424.1837 | 36,26  |
+
+***Tabela 9. $N = 8000, R = 16$***
+
+| Wariant         | K  | BlockSize | Czas    | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|---------|-----------|--------|
+| 0 - Sekwencyjny | -  | -         | 25.7140 | 2.6888    | -      |
+| 1               | 1  | 8         | 0.0632  | 1094.2898 | 102,15 |
+| 2               | 4  | 8         | 0.0594  | 1164.6607 | 96,48  |
+| 3               | 16 | 8         | 0.0606  | 1140.5354 | 96,28  |
+| 4               | 1  | 16        | 0.0314  | 2202.7989 | 123,26 |
+| 5               | 4  | 16        | 0.0285  | 2429.1239 | 98,07  |
+| 6               | 16 | 16        | 0.0324  | 2134.1052 | 116,51 |
+| 7               | 1  | 32        | 0.0286  | 2420.0743 | 103,40 |
+| 8               | 4  | 32        | 0.0279  | 2482.0572 | 114,90 |
+| 9               | 16 | 32        | 0.0280  | 2470.4554 | 98,32  |
 
 ### Wykresy
 ***Wykres 1. Miara wydajności obliczeniowej w zależności od wymiaru tablicy wejściowej ($N$)***
@@ -383,13 +394,29 @@ Ostatnią użytą przez nas miarą wydajności była ilość FLOP'ów / B. Wynik
 ## Wnioski
 
 ### Wpływ parametrów na czas wykonywania obliczeń
-Czas wykonywania obliczeń był zależny od użytych w eksperymencie parametrów. Największy wpływ miał parametr $R$, czyli promień w jakim wykonywane były obliczenia. Zauważyliśmy, że dla małej wartości $R$ wyniki eksperymentu były nieprzewidywalne. Spowodowane jest to najprawdopodobniej małym wykorzystaniem mocy obliczeniowej używanej karty graficznej. Przy zwiększeniu promienia, czas wykonywania obliczeń zdecydowanie się wydłużał. Różnica jest najlepiej widoczna dla algorytmu sekwencyjnego, który przy dużej ilości operacji do wykonania zdecydowanie spowalniał. Algorytm wykonujący obliczenia równolegle również znacząco spowolnił. Jest to spowodowane dużo większą liczbą operacji sumowania do wykonania nawet przy niewielkim zwiększeniu promienia. 
+Czas wykonywania obliczeń był zależny od użytych w eksperymencie parametrów. Największy wpływ miał parametr $R$, czyli promień w jakim wykonywane były obliczenia. Zauważyliśmy, że dla małej wartości $R$ wyniki eksperymentu były nieprzewidywalne. Spowodowane jest to najprawdopodobniej małym wykorzystaniem mocy obliczeniowej używanej karty graficznej. Dopiero przy $R=4$ oraz $N=8000$ udało się zauważyć poprawę $FLOP/B$ wraz z zwiększeniem liczby komórek liczonych przez jeden wątek.  Przy zwiększeniu promienia, czas wykonywania obliczeń zdecydowanie się wydłużał. Różnica jest najlepiej widoczna dla algorytmu sekwencyjnego, który przy dużej ilości operacji do wykonania zdecydowanie spowalniał. Algorytm wykonujący obliczenia równolegle również znacząco spowolnił. Jest to spowodowane dużo większą liczbą operacji sumowania do wykonania nawet przy niewielkim zwiększeniu promienia. 
 
-Kolejnym parametrem, który wpływał na wydłużenie wykonywania zadania jest liczba wyników obliczanych przez jeden wątek (parametr $K$). Jego zwiększenie również powoduje wydłużenie czasu wykonywania obliczeń. Powodowane jest to wzrostem liczby operacji, jakie musi wykonać każdy wątek, co prowadzi do zwiększenia czasu wykonania z powodu niekorzystnych wzorców dostępu do pamięci oraz zwiększonych opóźnień synchronizacji.
+Kolejnym parametrem, który wpływał na czas wykonywania zadania jest liczba wyników obliczanych przez jeden wątek (parametr $K$). Jego zwiększenie w teorii powinno zapewnić poprawę czasu wykonywania obliczeń dzięki zapewnieniu wspólnych dostępów do pamięci dla sąsiednich wątków. W przypadku niskich wartości $N$ i $R$ różnice są na tyle niewielkie, że nie można jednoznacznie ocenić wpływu parametru na obliczenia. W przypadku większych promieni i rozmiarów tablicy wejściowej różnica jest już bardziej widoczna. Zwiększenie parametru $k$ wpływa na nieznaczną poprawę prędkości obliczeń, $k=4$ zarówno jak $k=16$ dają zbliżone do siebie wyniki. Przykładowo:
 
-Podobną tendencję zauważyć można przy zmianie wielkości bloku. Im wyższa wartość $BS$, tym dłuższy czas wykonywania obliczeń. Jedynie w niektórych przypadkach blok o wielkości $16 \times 16$ pozwalał na wykonanie obliczeń w najkrótszym czasie (Tabela 1. Wariant 8; Tabela 2. Wariant 8; Tabela 5. Wariant 5; Tabela 8 Wariant 5; Tabela 9. Wariant 8).
+***Tabela 10. (fragment tabeli nr 9) $N = 8000, R = 16$***
+
+| Wariant         | K  | BlockSize | Czas    | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|---------|-----------|--------|
+| 7               | 1  | 32        | 0.0286  | 2420.0743 | 103,40 |
+| 8               | 4  | 32        | 0.0279  | 2482.0572 | 114,90 |
+| 9               | 16 | 32        | 0.0280  | 2470.4554 | 98,32  |
+
+Czas wykonywania obliczeń przy $k = 4$ jest wynosi $0,97$ raza czasu wariantu siódmego, gdzie wątek wykonuje obliczenia dla pojedynczej komórki.
+
+W przypadku rosnących wartości rozmiaru bloku czas obliczeń ulega jednoznacznej poprawie (przykład w tabeli nr. 11):
+
+***Tabela 11. (fragment tabli nr 9 - zestawienie wielkości bloku)  $N = 8000, R = 16$***
+
+| Wariant         | K  | BlockSize | Czas    | GFLOP/s   | FLOP/B |
+|-----------------|----|-----------|---------|-----------|--------|
+| 3               | 16 | 8         | 0.0606  | 1140.5354 | 96,28  |
+| 6               | 16 | 16        | 0.0324  | 2134.1052 | 116,51 |
+| 9               | 16 | 32        | 0.0280  | 2470.4554 | 98,32  |
  
 ### Podsumowanie wyników
-Badanie analizowało wydajność kernela CUDA przy różnych rozmiarach bloków ($BS$), liczbie wyników obliczanych przez wątki ($K$) dla macierzy wejściowej o rozmiarze ($N$) o wartościach ${1000, 1500, 2000}$ oraz różnych rozmiarach promienia w jakim wykonywane były obliczenia ($R$). Najlepsze wyniki pod względem wydajności ($GFLOP / s$) uzyskano dla małych i średnich bloków ($BS = 8$ lub $BS = 16$) z małą liczbą wyników na wątek ($K = 1$). Dla większych wartości $R$ czas wykonywania obliczeń znacznie się wydłużał. Było to spowodowane zdecydowanie większą ilością operacji, które wątek musiał wykonać. 
-
-W ***Tabeli 1.*** możemy zauważyć, że algorytm sekwencyjny jest $2.27$ razy szybszy od algorytmu wykonującego obliczenia równolegle. W ***Tabeli 4.*** następuje podobna sytuacja. Podejście sekwencyjne jest tam wykonywane w podobnym czasie, co najszybsze podejście równoległe. W pozostałych przypadkach możemy zauważyć, że podejście równoległe z wykorzystaniem CUDA znacznie przewyższa podejście sekwencyjne pod względem wydajności i czasu wykonania. Wydajność obliczeń w GFLOP/s również była znacznie wyższa. Kluczowym czynnikiem sukcesu był podział pracy na wątki oraz efektywna koalescencja dostępu do pamięci globalnej.
+Badanie analizowało wydajność kernela CUDA przy różnych rozmiarach bloków ($BS$), liczbie wyników obliczanych przez wątki ($K$) dla macierzy wejściowej o rozmiarze ($N$) o wartościach ${2000, 4000, 8000}$ oraz różnych rozmiarach promienia w jakim wykonywane były obliczenia ($R$). Najlepsze wyniki pod względem wydajności ($GFLOP / s$) uzyskano dla bloków o wielkości $b=32$, a także $k = {4, 16}$, z niewielką przewagą $k = 4$ . Dla większych wartości $R$ czas wykonywania obliczeń znacznie się wydłużał. Było to spowodowane zdecydowanie większą ilością operacji, które wątek musiał wykonać. 

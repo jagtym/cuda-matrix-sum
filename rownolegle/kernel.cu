@@ -11,29 +11,28 @@
 #include <vector>
 
 
-const int N = 2000;
-const int R = 2;
+const int N = 8000;
+const int R = 16;
 const int OUTSIZE = N - 2 * R;
 
 float sumLocalWithCuda(float *tab, float *out, int block_size, int k, char * name);
 
 __global__ void localKernel(float* tab, float* out, int* kkk)
 {
-    int i = (threadIdx.x + blockIdx.x * blockDim.x) * *kkk;
-    int j = (threadIdx.y + blockIdx.y * blockDim.y);
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = (threadIdx.y + blockIdx.y * blockDim.y) * (*kkk);
 
     for (int k = 0; k < *kkk; k++) {
-        int ik = i + k;
-        if (ik < OUTSIZE) {
-			float sum = 0;
-            for (int y = 0; y <= 2*R; y++) {
-                int jy = (j + y)*N;
-				for (int x = 0; x <= 2*R; x++) {
-					sum += tab[jy + (ik + x)];
+		float sum = 0;
+		if (i < OUTSIZE && j + k < OUTSIZE) {
+			for (int y = 0; y <= 2 * R; y++) {
+				int jyk = (j + y + k) * N;
+				for (int x = 0; x <= 2 * R; x++) {
+					sum += tab[jyk + (i + x)];
 				}
-            }
-            out[(j) * (OUTSIZE) + ik] = sum;
-        }
+			}
+			out[(j + k) * (OUTSIZE) + i] = sum;
+		}
     }
 }
 
@@ -92,14 +91,14 @@ int main()
     auto end = std::chrono::high_resolution_clock::now();
     auto timeSeq = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     int field = 2 * R + 1;
-    double fps = OUTSIZE * OUTSIZE / static_cast<double>(timeSeq.count() / 1000.f) * field * field;
+    double fps = ((OUTSIZE * OUTSIZE) / static_cast<double>(timeSeq.count() / 1000.f)) * field * field;
 
 
     printf("-,-,%.4f,%.4f\n", timeSeq.count() / 1000.0f, fps / 1e9);
 
     float* out_local = (float*)malloc(OUTSIZE * OUTSIZE * sizeof(float));
     start = std::chrono::high_resolution_clock::now();
-    sumLocalWithCuda(tab, out_local, 1, 8, "warmup");
+    sumLocalWithCuda(tab, out_local, 16, 16, "warmup");
     end = std::chrono::high_resolution_clock::now();
     timeSeq = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
@@ -108,8 +107,8 @@ int main()
 
     long long memory_traffic_elem = field * field * sizeof(float) + sizeof(float);
     long long full_memory_traffic = (OUTSIZE) * (OUTSIZE) * memory_traffic_elem;
-    for (auto k : ks) {
-        for (auto b : bs) {
+    for (auto b : bs) {
+        for (auto k : ks) {
 			cudaDeviceReset();
             char text[30] = "";
             sprintf(text, "b: %d, k: %d", b, k);
@@ -117,10 +116,10 @@ int main()
 			auto ftime = sumLocalWithCuda(tab, out_local, b, k, text);
 			end = std::chrono::high_resolution_clock::now();
 			timeSeq = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-            double fps = OUTSIZE * OUTSIZE / static_cast<double>(ftime / 1000.f) * field * field ;
+            double ffps = ((OUTSIZE * OUTSIZE) / static_cast<double>(ftime / 1000.f)) * field * field;
             double fpb = 0 / static_cast<double>(full_memory_traffic);
 
-			printf("%d,%d,%.4f,%.4f\n", b, k, timeSeq.count() / 1000.0f, fps / 1e9);
+			printf("%d,%d,%.4f,%.4f\n", k, b, ftime / 1000.0f, ffps / 1e9);
             
             for (int i = 0; i < OUTSIZE * OUTSIZE; i++) {
                 if (out_local[i] != out_seq[i]) {
@@ -143,7 +142,7 @@ float sumLocalWithCuda(float* tab, float* out, int block_size, int k, char* name
     cudaEvent_t stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    float time;
+    float time = 0;
 
     cudaStatus = cudaSetDevice(0);
     if (cudaStatus != cudaSuccess) {
@@ -182,7 +181,7 @@ float sumLocalWithCuda(float* tab, float* out, int block_size, int k, char* name
     }
 
     dim3 threadsMatrix(block_size, block_size);
-    dim3 blocksMatrix(ceil((OUTSIZE) / (float)block_size / k), ceil((OUTSIZE) / (float)block_size));
+    dim3 blocksMatrix(ceil(OUTSIZE / (float)block_size), ceil(OUTSIZE / (float)block_size / k));
 
     cudaEventRecord(start, nullptr);
 
@@ -207,13 +206,11 @@ float sumLocalWithCuda(float* tab, float* out, int block_size, int k, char* name
 
     cudaEventRecord(stop, nullptr);
 
-
     cudaStatus = cudaMemcpy(out, dev_out, (OUTSIZE) * (OUTSIZE) * sizeof(float), cudaMemcpyDeviceToHost);
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaMemcpy failed!");
         goto Error;
     }
-
     cudaEventElapsedTime(&time, start, stop);
 
     Error:
